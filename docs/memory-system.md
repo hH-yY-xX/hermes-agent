@@ -34,6 +34,78 @@ Hermes Agent 拥有一个多层架构的记忆系统，主要包含以下模块�
 
 ---
 
+## 2.1 外部可插拔 Memory Provider 详细功能
+
+### 核心定位
+
+让 Agent 拥有超出内置 MEMORY.md 有限容量的、更强大的长期记忆能力。
+
+内置的 curated 记忆上限只有 ~2200 字符，只够记最关键的事实。外部 provider 通过接入第三方记忆后端（向量数据库、语义搜索引擎等），实现**无上限的、语义化的、跨会话的长期记忆**。
+
+### 与内置记忆的关系
+
+```
+内置 MEMORY.md/USER.md  ── 手工精炼的"便签"（小容量，高信噪比）
+        +
+外部 Memory Provider   ── 自动管理的"数据库"（大容量，语义检索）
+        =
+        完整的长期记忆系统
+```
+
+两者**并行工作**，互不替代：
+- 内置记忆始终启用，作为保底
+- 外部 provider 可选，通过 `memory.provider` 配置项选择**唯一一个**激活
+- 外部 provider 还能通过 `on_memory_write()` 监听内置记忆的写入，实现双向同步
+
+### 主要能力
+
+| 能力 | 说明 |
+|------|------|
+| **语义召回** | `prefetch()` 在每轮对话前，根据当前消息语义检索相关历史上下文，注入到 Agent 的记忆中 |
+| **自动持久化** | `sync_turn()` 在每轮对话后，自动把对话内容发送到后端存储，无需手动操作 |
+| **专用工具** | provider 可以暴露自己的工具（如 `honcho_update_profile`），通过工具 schema 注册到 Agent |
+| **会话结束提取** | `on_session_end()` 在会话结束时从完整对话中提取事实并存储 |
+| **压缩保护** | `on_pre_compress()` 在上下文压缩前提供洞察，确保重要记忆不被丢弃 |
+| **子代理观察** | `on_delegation()` 当子代理完成任务时，记录委托内容和结果 |
+
+### 可用的 8 个外部 Provider
+
+| Provider | 特点 |
+|----------|------|
+| **Honcho** | Honcho AI 服务，专注用户画像和项目管理 |
+| **Mem0** | Mem0 记忆引擎，支持向量语义搜索 |
+| **Hindsight** | 事后洞察型记忆 |
+| **SuperMemory** | SuperMemory 后端 |
+| **Holographic** | 全息记忆（自带 store + retrieval） |
+| **ByteRover** | ByteRover 记忆服务 |
+| **OpenViking** | OpenViking 记忆后端 |
+| **RetainDB** | RetainDB 数据库记忆 |
+
+### 生命周期流程
+
+```
+Agent 启动
+  │
+  ├─ initialize()          初始化连接（创建数据库表、建立连接等）
+  │
+每轮对话开始
+  ├─ prefetch()            后台语义召回，注入相关上下文
+  ├─ on_turn_start()       轮次计数、维护任务
+  │
+对话进行中
+  ├─ handle_tool_call()    处理 provider 专属工具调用
+  │
+每轮对话结束
+  ├─ sync_turn()           发送本轮对话到后端存储
+  └─ queue_prefetch()      排队下一轮的语义召回
+  │
+会话结束
+  ├─ on_session_end()      提取会话级事实
+  └─ shutdown()            清理连接、刷新队列
+```
+
+---
+
 ## 3. SQLite 会话状态存储（对话历史）
 
 **核心文件：** `hermes_state.py`
